@@ -73,11 +73,47 @@ class RadarSensor {
             this.log('COM 포트에 연결되었습니다!', 'success');
             this.updateStatus(true);
 
+            // Writer 설정
+            this.writer = this.port.writable.getWriter();
+
+            // 센서 초기화 및 명령 전송
+            await this.initializeSensor();
+
             // 데이터 읽기 시작
             this.startReading();
         } catch (error) {
             this.log(`연결 오류: ${error.message}`, 'error');
             console.error('연결 오류:', error);
+        }
+    }
+
+    async initializeSensor() {
+        try {
+            this.log('센서 초기화 중...', 'info');
+
+            // SEN0395 명령어들
+            const commands = [
+                'sensorStart\r\n', // 센서 시작
+                'outputLatency 0\r\n', // 지연시간 최소화
+                'sensorStop\r\n', // 잠시 정지
+                'sensorStart\r\n', // 다시 시작
+            ];
+
+            for (const cmd of commands) {
+                this.log(`명령 전송: ${cmd.trim()}`, 'info');
+                const encoder = new TextEncoder();
+                await this.writer.write(encoder.encode(cmd));
+                await new Promise((resolve) => setTimeout(resolve, 100)); // 100ms 대기
+            }
+
+            // Writer 해제 (읽기 시작 전에)
+            this.writer.releaseLock();
+            this.writer = null;
+
+            this.log('센서 초기화 완료!', 'success');
+        } catch (error) {
+            this.log(`초기화 오류: ${error.message}`, 'error');
+            console.error('초기화 오류:', error);
         }
     }
 
@@ -467,6 +503,11 @@ class RadarSensor {
                 await this.reader.cancel();
                 this.reader.releaseLock();
                 this.reader = null;
+            }
+
+            if (this.writer) {
+                this.writer.releaseLock();
+                this.writer = null;
             }
 
             if (this.port) {
