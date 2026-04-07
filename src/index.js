@@ -10,6 +10,8 @@ class RadarSensor {
         this.ctx = this.canvas.getContext('2d');
         this.detectionHistory = [];
         this.maxHistory = 50;
+        this.readBuffer = new Uint8Array();
+        this.polling = false;
 
         this.initUI();
         this.startAnimation();
@@ -73,55 +75,74 @@ class RadarSensor {
             this.log('COM 포트에 연결되었습니다!', 'success');
             this.updateStatus(true);
 
-            // Writer 설정
-            this.writer = this.port.writable.getWriter();
-
-            // 센서 초기화 및 명령 전송
-            await this.initializeSensor();
-
-            // 데이터 읽기 시작
+            // 데이터 읽기 및 폴링 시작
             this.startReading();
+            this.startPolling();
         } catch (error) {
             this.log(`연결 오류: ${error.message}`, 'error');
             console.error('연결 오류:', error);
         }
     }
 
-    async initializeSensor() {
-        try {
-            this.log('센서 초기화 중...', 'info');
-
-            // SEN0395 명령어들
-            const commands = [
-                'sensorStart\r\n', // 센서 시작
-                'outputLatency 0\r\n', // 지연시간 최소화
-                'sensorStop\r\n', // 잠시 정지
-                'sensorStart\r\n', // 다시 시작
-            ];
-
-            for (const cmd of commands) {
-                this.log(`명령 전송: ${cmd.trim()}`, 'info');
-                const encoder = new TextEncoder();
-                await this.writer.write(encoder.encode(cmd));
-                await new Promise((resolve) => setTimeout(resolve, 100)); // 100ms 대기
+    // CRC16 계산 (Modbus RTU)
+    calculateCRC16(buffer) {
+        let crc = 0xffff;
+        for (let pos = 0; pos < buffer.length; pos++) {
+            crc ^= buffer[pos];
+            for (let i = 8; i !== 0; i--) {
+                if ((crc & 0x0001) !== 0) {
+                    crc >>= 1;
+                    crc ^= 0xa001;
+                } else {
+                    crc >>= 1;
+                }
             }
-
-            // Writer 해제 (읽기 시작 전에)
-            this.writer.releaseLock();
-            this.writer = null;
-
-            this.log('센서 초기화 완료!', 'success');
-        } catch (error) {
-            this.log(`초기화 오류: ${error.message}`, 'error');
-            console.error('초기화 오류:', error);
         }
+        // 바이트 스왑
+        return ((crc & 0x00ff) << 8) | ((crc & 0xff00) >> 8);
+    }
+
+    // 센서에 거리 요청 명령 전송
+    async sendDistanceCommand() {
+        try {
+            // 명령: 0x01, 0x03, 0x01, 0x01, 0x00, 0x01, 0xd4, 0x36
+            const command = new Uint8Array([
+                0x01, 0x03, 0x01, 0x01, 0x00, 0x01, 0xd4, 0x36,
+            ]);
+
+            const writer = this.port.writable.getWriter();
+            await writer.write(command);
+            writer.releaseLock();
+
+            this.log(
+                `명령 전송: ${Array.from(command)
+                    .map((b) => '0x' + b.toString(16).padStart(2, '0'))
+                    .join(' ')}`,
+                'info',
+            );
+        } catch (error) {
+            this.log(`명령 전송 오류: ${error.message}`, 'error');
+        }
+    }
+
+    // 주기적으로 센서에 명령 전송 (500ms 간격)
+    async startPolling() {
+        this.polling = true;
+
+        while (this.polling && this.connected) {
+            await this.sendDistanceCommand();
+            await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+    }
+
+    async initializeSensor() {
+        // Modbus 방식에서는 초기화 불필요
+        this.log('센서 준비 완료', 'success');
     }
 
     async startReading() {
         try {
             this.reader = this.port.readable.getReader();
-            let buffer = new Uint8Array();
-            let textBuffer = '';
 
             this.log('데이터 수신 대기 중...', 'info');
 
@@ -135,32 +156,22 @@ class RadarSensor {
                 if (value) {
                     // Raw 바이트 데이터 로깅
                     this.log(
-                        `수신 (${value.length} bytes): ${Array.from(
-                            value.slice(0, 20),
-                        )
-                            .map((b) => b.toString(16).padStart(2, '0'))
+                        `수신 (${value.length} bytes): ${Array.from(value)
+                            .map((b) => '0x' + b.toString(16).padStart(2, '0'))
                             .join(' ')}`,
                         'success',
                     );
 
-                    // 텍스트로 디코딩 시도
-                    try {
-                        const text = new TextDecoder().decode(value);
-                        textBuffer += text;
+                    // 버퍼에 추가
+                    const newBuffer = new Uint8Array(
+                        this.readBuffer.length + value.length,
+                    );
+                    newBuffer.set(this.readBuffer);
+                    newBuffer.set(value, this.readBuffer.length);
+                    this.readBuffer = newBuffer;
 
-                        // 줄바꿈으로 데이터 분리
-                        const lines = textBuffer.split(/[\r\n]+/);
-                        textBuffer = lines.pop(); // 마지막 불완전한 라인은 버퍼에 유지
-
-                        for (const line of lines) {
-                            if (line.trim()) {
-                                this.processData(line.trim());
-                            }
-                        }
-                    } catch (e) {
-                        // 텍스트 디코딩 실패 - 바이너리 데이터
-                        this.processBinaryData(value);
-                    }
+                    // Modbus 응답 파싱 시도
+                    this.parseModbusResponse();
                 }
             }
         } catch (error) {
@@ -175,138 +186,77 @@ class RadarSensor {
         }
     }
 
-    processBinaryData(data) {
-        this.packetCount++;
-        document.getElementById('packetCount').textContent = this.packetCount;
-
-        // 바이너리 데이터 파싱 (SEN0395는 일반적으로 텍스트 출력)
-        this.log(
-            `바이너리 (${data.length} bytes): ${Array.from(data)
-                .map((b) => b.toString(16).padStart(2, '0'))
-                .join(' ')}`,
-            'info',
-        );
-
-        // SEN0395 바이너리 프로토콜 (제조사 문서 참조)
-        // 일반적인 패킷 구조: [Header][Length][Data][Checksum]
-        if (data.length >= 8) {
-            // 헤더 확인 (예: 0xAA 0x55)
-            if (data[0] === 0xaa && data[1] === 0x55) {
-                const length = data[2];
-                const cmd = data[3];
-
-                // 거리 데이터 명령 (예: 0x03)
-                if (cmd === 0x03 && data.length >= length) {
-                    const distance = data[4] | (data[5] << 8);
-                    const detected = data[6] === 0x01;
-                    this.updateDisplay(distance, null, detected);
-                    return;
+    parseModbusResponse() {
+        // Modbus 응답 형식: 0x01 0x03 0x02 [DATA_H] [DATA_L] [CRC_L] [CRC_H]
+        // 최소 7바이트 필요
+        while (this.readBuffer.length >= 7) {
+            // 헤더 찾기: 0x01 0x03
+            let headerIndex = -1;
+            for (let i = 0; i < this.readBuffer.length - 1; i++) {
+                if (
+                    this.readBuffer[i] === 0x01 &&
+                    this.readBuffer[i + 1] === 0x03
+                ) {
+                    headerIndex = i;
+                    break;
                 }
             }
-        }
 
-        // 폴백: 첫 2바이트를 거리로 간주 (리틀 엔디안)
-        if (data.length >= 2) {
-            const distance = data[0] | (data[1] << 8);
-            if (distance > 0 && distance < 10000) {
-                this.updateDisplay(distance / 10, null, distance < 2000);
+            if (headerIndex === -1) {
+                // 헤더 없음 - 버퍼 비우기
+                this.readBuffer = new Uint8Array();
+                break;
             }
-        }
-    }
 
-    processData(data) {
-        this.packetCount++;
-        document.getElementById('packetCount').textContent = this.packetCount;
-
-        // Raw 데이터 로깅
-        this.log(
-            `텍스트: ${data.substring(0, 100)}${data.length > 100 ? '...' : ''}`,
-            'info',
-        );
-
-        // DFRobot SEN0395 센서 데이터 파싱
-        // 출력 형식: "$JYBSS,0,target,123,0,0,0*XX" 또는 간단한 텍스트
-
-        // SEN0395 형식: $JYBSS 프로토콜
-        if (data.startsWith('$JYBSS')) {
-            const parts = data.split(',');
-            if (parts.length >= 4) {
-                const status = parts[1]; // 0=no target, 1=target
-                const type = parts[2]; // 'target' or 'noTarget'
-                const distance = parseInt(parts[3]); // distance in cm
-
-                const detected = status === '1' || type === 'target';
-                this.updateDisplay(distance, null, detected);
-                return;
+            // 헤더 이전 데이터 제거
+            if (headerIndex > 0) {
+                this.readBuffer = this.readBuffer.slice(headerIndex);
             }
-        }
 
-        // 간단한 출력 형식: "Target detected at 123cm"
-        if (data.includes('Target') || data.includes('target')) {
-            const distMatch = data.match(/(\d+)\s*cm/i);
-            if (distMatch) {
-                const distance = parseInt(distMatch[1]);
-                this.updateDisplay(distance, null, true);
-                return;
+            // 충분한 데이터가 있는지 확인
+            if (this.readBuffer.length < 7) {
+                break;
             }
-        }
 
-        // "No target" 또는 "noTarget"
-        if (
-            data.toLowerCase().includes('no target') ||
-            data.toLowerCase().includes('notarget')
-        ) {
-            this.updateDisplay(0, null, false);
-            return;
-        }
+            // 데이터 길이 확인
+            if (this.readBuffer[2] === 0x02) {
+                // 패킷 추출
+                const packet = this.readBuffer.slice(0, 7);
 
-        // 범용 형식 1: JSON 형태
-        try {
-            const jsonData = JSON.parse(data);
-            this.updateDisplay(
-                jsonData.distance,
-                jsonData.strength,
-                jsonData.detected,
-            );
-            return;
-        } catch (e) {
-            // JSON이 아님
-        }
+                // CRC 검증
+                const dataPart = packet.slice(0, 5);
+                const receivedCRC = (packet[5] << 8) | packet[6];
+                const calculatedCRC = this.calculateCRC16(dataPart);
 
-        // 범용 형식 2: "거리:100,강도:50" 형태
-        const distanceMatch =
-            data.match(/거리[:=\s]*(\d+\.?\d*)/i) ||
-            data.match(/distance[:=\s]*(\d+\.?\d*)/i) ||
-            data.match(/dist[:=\s]*(\d+\.?\d*)/i);
+                this.log(
+                    `CRC 검증: 수신=${receivedCRC.toString(16)}, 계산=${calculatedCRC.toString(16)}`,
+                    'info',
+                );
 
-        const strengthMatch =
-            data.match(/강도[:=\s]*(\d+\.?\d*)/i) ||
-            data.match(/strength[:=\s]*(\d+\.?\d*)/i) ||
-            data.match(/rssi[:=\s]*(-?\d+\.?\d*)/i);
+                if (receivedCRC === calculatedCRC) {
+                    // 거리 데이터 추출 (mm 단위)
+                    const distance = (packet[3] << 8) | packet[4];
 
-        if (distanceMatch) {
-            const distance = parseFloat(distanceMatch[1]);
-            const strength = strengthMatch
-                ? parseFloat(strengthMatch[1])
-                : null;
-            const detected = distance < 200; // 2m 이내면 감지로 판단
+                    this.packetCount++;
+                    document.getElementById('packetCount').textContent =
+                        this.packetCount;
 
-            this.updateDisplay(distance, strength, detected);
-            return;
-        }
+                    this.log(`거리 측정: ${distance} mm`, 'success');
 
-        // 형식 3: 숫자만 있는 경우 (거리 값으로 간주)
-        const numericMatch = data.match(/(\d+\.?\d*)/);
-        if (numericMatch) {
-            const distance = parseFloat(numericMatch[1]);
-            this.updateDisplay(distance, null, distance < 200);
-            return;
-        }
+                    // cm로 변환하여 표시
+                    const distanceCm = distance / 10;
+                    const detected = distance > 0 && distance < 5000; // 5m 이내
+                    this.updateDisplay(distanceCm, null, detected);
+                } else {
+                    this.log('CRC 오류!', 'error');
+                }
 
-        // 형식 4: 16진수 데이터
-        if (data.match(/^[0-9A-Fa-f\s]+$/)) {
-            this.log(`HEX 데이터: ${data}`, 'info');
-            // 16진수 파싱 로직은 센서 프로토콜에 따라 구현
+                // 처리된 패킷 제거
+                this.readBuffer = this.readBuffer.slice(7);
+            } else {
+                // 잘못된 패킷 - 1바이트 건너뛰기
+                this.readBuffer = this.readBuffer.slice(1);
+            }
         }
     }
 
@@ -498,6 +448,7 @@ class RadarSensor {
     async disconnect() {
         try {
             this.connected = false;
+            this.polling = false;
 
             if (this.reader) {
                 await this.reader.cancel();
