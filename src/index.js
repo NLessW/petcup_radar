@@ -321,14 +321,16 @@ class RadarSensor {
                 this.detectionHistory[this.detectionHistory.length - 1];
             // cm를 mm로 변환
             currentDistance = latest.distance * 10;
+            // 최대값 제한
+            if (currentDistance > maxDistance) {
+                currentDistance = maxDistance;
+            }
         }
 
         // 채움 비율 계산 (거리가 가까울수록 많이 채움)
         let fillRatio = 0;
         if (currentDistance >= 0 && currentDistance <= maxDistance) {
             fillRatio = 1 - currentDistance / maxDistance;
-        } else if (currentDistance > maxDistance) {
-            fillRatio = 0;
         }
 
         // 채워지는 높이 계산
