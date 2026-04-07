@@ -3,7 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>CDJQ314 레이더 센서</title>
+        <title>DFRobot SEN0395 mmWave 레이더</title>
         <style>
             * {
                 margin: 0;
@@ -191,10 +191,26 @@
     </head>
     <body>
         <div class="container">
-            <h1>🎯 CDJQ314 레이더 센서</h1>
+            <h1>🎯 DFRobot SEN0395 mmWave 레이더</h1>
 
             <div class="controls">
-                <button id="connectBtn">포트 연결 (COM9)</button>
+                <select
+                    id="baudRate"
+                    style="
+                        padding: 12px;
+                        border-radius: 8px;
+                        border: 2px solid #667eea;
+                        font-size: 16px;
+                        margin-right: 10px;
+                    ">
+                    <option value="9600">9600</option>
+                    <option value="19200">19200</option>
+                    <option value="38400">38400</option>
+                    <option value="57600">57600</option>
+                    <option value="115200" selected>115200</option>
+                    <option value="256000">256000</option>
+                </select>
+                <button id="connectBtn">포트 연결</button>
                 <button id="disconnectBtn" disabled>연결 해제</button>
             </div>
 

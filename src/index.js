@@ -1,4 +1,4 @@
-// CDJQ314 레이더 센서 - Web Serial API
+// DFRobot SEN0395 mmWave 레이더 센서 - Web Serial API
 class RadarSensor {
     constructor() {
         this.port = null;
@@ -54,9 +54,15 @@ class RadarSensor {
             // 시리얼 포트 요청
             this.port = await navigator.serial.requestPort();
 
+            // 선택된 보드레이트 가져오기
+            const baudRate = parseInt(
+                document.getElementById('baudRate').value,
+            );
+            this.log(`보드레이트: ${baudRate} 사용`, 'info');
+
             // 포트 열기 (CDJQ314 센서의 일반적인 설정)
             await this.port.open({
-                baudRate: 115200, // 일반적인 보드레이트, 필요시 9600, 57600으로 변경
+                baudRate: baudRate,
                 dataBits: 8,
                 stopBits: 1,
                 parity: 'none',
@@ -77,11 +83,11 @@ class RadarSensor {
 
     async startReading() {
         try {
-            const decoder = new TextDecoderStream();
-            this.port.readable.pipeTo(decoder.writable);
-            this.reader = decoder.readable.getReader();
+            this.reader = this.port.readable.getReader();
+            let buffer = new Uint8Array();
+            let textBuffer = '';
 
-            let buffer = '';
+            this.log('데이터 수신 대기 중...', 'info');
 
             while (true) {
                 const { value, done } = await this.reader.read();
@@ -91,16 +97,33 @@ class RadarSensor {
                 }
 
                 if (value) {
-                    buffer += value;
+                    // Raw 바이트 데이터 로깅
+                    this.log(
+                        `수신 (${value.length} bytes): ${Array.from(
+                            value.slice(0, 20),
+                        )
+                            .map((b) => b.toString(16).padStart(2, '0'))
+                            .join(' ')}`,
+                        'success',
+                    );
 
-                    // 줄바꿈으로 데이터 분리
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop(); // 마지막 불완전한 라인은 버퍼에 유지
+                    // 텍스트로 디코딩 시도
+                    try {
+                        const text = new TextDecoder().decode(value);
+                        textBuffer += text;
 
-                    for (const line of lines) {
-                        if (line.trim()) {
-                            this.processData(line.trim());
+                        // 줄바꿈으로 데이터 분리
+                        const lines = textBuffer.split(/[\r\n]+/);
+                        textBuffer = lines.pop(); // 마지막 불완전한 라인은 버퍼에 유지
+
+                        for (const line of lines) {
+                            if (line.trim()) {
+                                this.processData(line.trim());
+                            }
                         }
+                    } catch (e) {
+                        // 텍스트 디코딩 실패 - 바이너리 데이터
+                        this.processBinaryData(value);
                     }
                 }
             }
@@ -116,20 +139,92 @@ class RadarSensor {
         }
     }
 
+    processBinaryData(data) {
+        this.packetCount++;
+        document.getElementById('packetCount').textContent = this.packetCount;
+
+        // 바이너리 데이터 파싱 (SEN0395는 일반적으로 텍스트 출력)
+        this.log(
+            `바이너리 (${data.length} bytes): ${Array.from(data)
+                .map((b) => b.toString(16).padStart(2, '0'))
+                .join(' ')}`,
+            'info',
+        );
+
+        // SEN0395 바이너리 프로토콜 (제조사 문서 참조)
+        // 일반적인 패킷 구조: [Header][Length][Data][Checksum]
+        if (data.length >= 8) {
+            // 헤더 확인 (예: 0xAA 0x55)
+            if (data[0] === 0xaa && data[1] === 0x55) {
+                const length = data[2];
+                const cmd = data[3];
+
+                // 거리 데이터 명령 (예: 0x03)
+                if (cmd === 0x03 && data.length >= length) {
+                    const distance = data[4] | (data[5] << 8);
+                    const detected = data[6] === 0x01;
+                    this.updateDisplay(distance, null, detected);
+                    return;
+                }
+            }
+        }
+
+        // 폴백: 첫 2바이트를 거리로 간주 (리틀 엔디안)
+        if (data.length >= 2) {
+            const distance = data[0] | (data[1] << 8);
+            if (distance > 0 && distance < 10000) {
+                this.updateDisplay(distance / 10, null, distance < 2000);
+            }
+        }
+    }
+
     processData(data) {
         this.packetCount++;
         document.getElementById('packetCount').textContent = this.packetCount;
 
         // Raw 데이터 로깅
         this.log(
-            `수신: ${data.substring(0, 50)}${data.length > 50 ? '...' : ''}`,
+            `텍스트: ${data.substring(0, 100)}${data.length > 100 ? '...' : ''}`,
             'info',
         );
 
-        // CDJQ314 센서 데이터 파싱
-        // 센서마다 프로토콜이 다를 수 있으므로 여러 형식 시도
+        // DFRobot SEN0395 센서 데이터 파싱
+        // 출력 형식: "$JYBSS,0,target,123,0,0,0*XX" 또는 간단한 텍스트
 
-        // 형식 1: JSON 형태
+        // SEN0395 형식: $JYBSS 프로토콜
+        if (data.startsWith('$JYBSS')) {
+            const parts = data.split(',');
+            if (parts.length >= 4) {
+                const status = parts[1]; // 0=no target, 1=target
+                const type = parts[2]; // 'target' or 'noTarget'
+                const distance = parseInt(parts[3]); // distance in cm
+
+                const detected = status === '1' || type === 'target';
+                this.updateDisplay(distance, null, detected);
+                return;
+            }
+        }
+
+        // 간단한 출력 형식: "Target detected at 123cm"
+        if (data.includes('Target') || data.includes('target')) {
+            const distMatch = data.match(/(\d+)\s*cm/i);
+            if (distMatch) {
+                const distance = parseInt(distMatch[1]);
+                this.updateDisplay(distance, null, true);
+                return;
+            }
+        }
+
+        // "No target" 또는 "noTarget"
+        if (
+            data.toLowerCase().includes('no target') ||
+            data.toLowerCase().includes('notarget')
+        ) {
+            this.updateDisplay(0, null, false);
+            return;
+        }
+
+        // 범용 형식 1: JSON 형태
         try {
             const jsonData = JSON.parse(data);
             this.updateDisplay(
@@ -142,7 +237,7 @@ class RadarSensor {
             // JSON이 아님
         }
 
-        // 형식 2: "거리:100,강도:50" 형태
+        // 범용 형식 2: "거리:100,강도:50" 형태
         const distanceMatch =
             data.match(/거리[:=\s]*(\d+\.?\d*)/i) ||
             data.match(/distance[:=\s]*(\d+\.?\d*)/i) ||
