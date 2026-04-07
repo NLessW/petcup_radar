@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="ko">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>CDJQ314 레이더 센서</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                padding: 20px;
+            }
+
+            .container {
+                background: white;
+                border-radius: 20px;
+                box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                padding: 40px;
+                max-width: 800px;
+                width: 100%;
+            }
+
+            h1 {
+                color: #333;
+                text-align: center;
+                margin-bottom: 30px;
+                font-size: 2em;
+            }
+
+            .controls {
+                display: flex;
+                gap: 10px;
+                margin-bottom: 30px;
+                justify-content: center;
+            }
+
+            button {
+                padding: 12px 30px;
+                font-size: 16px;
+                border: none;
+                border-radius: 8px;
+                cursor: pointer;
+                transition: all 0.3s;
+                font-weight: 600;
+            }
+
+            #connectBtn {
+                background: #667eea;
+                color: white;
+            }
+
+            #connectBtn:hover {
+                background: #5568d3;
+                transform: translateY(-2px);
+                box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+            }
+
+            #connectBtn:disabled {
+                background: #ccc;
+                cursor: not-allowed;
+                transform: none;
+            }
+
+            #disconnectBtn {
+                background: #f56565;
+                color: white;
+            }
+
+            #disconnectBtn:hover:not(:disabled) {
+                background: #e53e3e;
+                transform: translateY(-2px);
+                box-shadow: 0 5px 15px rgba(245, 101, 101, 0.4);
+            }
+
+            #disconnectBtn:disabled {
+                background: #ccc;
+                cursor: not-allowed;
+            }
+
+            .status {
+                padding: 15px;
+                border-radius: 8px;
+                margin-bottom: 20px;
+                font-weight: 600;
+                text-align: center;
+            }
+
+            .status.disconnected {
+                background: #fed7d7;
+                color: #c53030;
+            }
+
+            .status.connected {
+                background: #c6f6d5;
+                color: #22543d;
+            }
+
+            .radar-display {
+                background: #1a202c;
+                border-radius: 12px;
+                padding: 20px;
+                margin-bottom: 20px;
+                position: relative;
+                overflow: hidden;
+            }
+
+            canvas {
+                display: block;
+                width: 100%;
+                background: radial-gradient(circle, #2d3748 0%, #1a202c 100%);
+                border-radius: 8px;
+            }
+
+            .data-panel {
+                background: #f7fafc;
+                border-radius: 8px;
+                padding: 20px;
+                margin-bottom: 20px;
+            }
+
+            .data-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                gap: 15px;
+                margin-bottom: 15px;
+            }
+
+            .data-item {
+                background: white;
+                padding: 15px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            }
+
+            .data-label {
+                font-size: 12px;
+                color: #718096;
+                margin-bottom: 5px;
+            }
+
+            .data-value {
+                font-size: 24px;
+                font-weight: 700;
+                color: #2d3748;
+            }
+
+            .data-unit {
+                font-size: 14px;
+                color: #a0aec0;
+                margin-left: 5px;
+            }
+
+            .log-container {
+                background: #2d3748;
+                border-radius: 8px;
+                padding: 15px;
+                max-height: 200px;
+                overflow-y: auto;
+                font-family: 'Courier New', monospace;
+                font-size: 12px;
+            }
+
+            .log-entry {
+                color: #a0aec0;
+                padding: 3px 0;
+                border-bottom: 1px solid #4a5568;
+            }
+
+            .log-entry:last-child {
+                border-bottom: none;
+            }
+
+            .log-entry.error {
+                color: #fc8181;
+            }
+
+            .log-entry.success {
+                color: #68d391;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🎯 CDJQ314 레이더 센서</h1>
+
+            <div class="controls">
+                <button id="connectBtn">포트 연결 (COM9)</button>
+                <button id="disconnectBtn" disabled>연결 해제</button>
+            </div>
+
+            <div id="status" class="status disconnected">연결되지 않음</div>
+
+            <div class="radar-display">
+                <canvas id="radarCanvas" width="700" height="400"></canvas>
+            </div>
+
+            <div class="data-panel">
+                <div class="data-grid">
+                    <div class="data-item">
+                        <div class="data-label">거리</div>
+                        <div class="data-value">
+                            <span id="distance">--</span>
+                            <span class="data-unit">cm</span>
+                        </div>
+                    </div>
+                    <div class="data-item">
+                        <div class="data-label">신호 강도</div>
+                        <div class="data-value">
+                            <span id="strength">--</span>
+                            <span class="data-unit">dB</span>
+                        </div>
+                    </div>
+                    <div class="data-item">
+                        <div class="data-label">감지 상태</div>
+                        <div class="data-value">
+                            <span id="detection">대기중</span>
+                        </div>
+                    </div>
+                    <div class="data-item">
+                        <div class="data-label">데이터 수신</div>
+                        <div class="data-value">
+                            <span id="packetCount">0</span>
+                            <span class="data-unit">개</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="log-container" id="logContainer">
+                <div class="log-entry">로그 시작...</div>
+            </div>
+        </div>
+
+        <script src="src/index.js"></script>
+    </body>
+</html>
