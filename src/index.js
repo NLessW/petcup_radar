@@ -131,7 +131,7 @@ class RadarSensor {
 
         while (this.polling && this.connected) {
             await this.sendDistanceCommand();
-            await new Promise((resolve) => setTimeout(resolve, 100));
+            await new Promise((resolve) => setTimeout(resolve, 200));
         }
     }
 
@@ -238,8 +238,6 @@ class RadarSensor {
                     const distance = (packet[3] << 8) | packet[4];
 
                     this.packetCount++;
-                    document.getElementById('packetCount').textContent =
-                        this.packetCount;
 
                     this.log(`거리 측정: ${distance} mm`, 'success');
 
@@ -264,8 +262,10 @@ class RadarSensor {
         // 거리 표시 (mm 단위)
         if (distance !== null && distance !== undefined) {
             const distanceMm = distance * 10; // cm를 mm로 변환
-            document.getElementById('distance').textContent =
-                distanceMm.toFixed(0);
+            const distanceElement = document.getElementById('distance');
+            if (distanceElement) {
+                distanceElement.textContent = distanceMm.toFixed(0);
+            }
         }
 
         // 히스토리에 추가
@@ -311,8 +311,8 @@ class RadarSensor {
             containerHeight,
         );
 
-        // 측정 최대 거리 (mm 단위, 예: 2000mm = 2m)
-        const maxDistance = 2000;
+        // 측정 최대 거리 (mm 단위, 예: 575mm)
+        const maxDistance = 575;
 
         // 현재 거리 가져오기
         let currentDistance = 0;
@@ -326,9 +326,9 @@ class RadarSensor {
         // 채움 비율 계산 (거리가 가까울수록 많이 채움)
         let fillRatio = 0;
         if (currentDistance > 0 && currentDistance <= maxDistance) {
-            fillRatio = currentDistance / maxDistance;
+            fillRatio = 1 - currentDistance / maxDistance;
         } else if (currentDistance > maxDistance) {
-            fillRatio = 1;
+            fillRatio = 0;
         }
 
         // 채워지는 높이 계산
@@ -369,7 +369,51 @@ class RadarSensor {
                 containerWidth,
                 fillHeight,
             );
+
+            // 물결 효과
+            const time = Date.now() / 1000;
+            const waveAmplitude = 5;
+            const waveFrequency = 2;
+            const waveY = containerY + containerHeight - fillHeight;
+
+            this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+            this.ctx.lineWidth = 2;
+            this.ctx.beginPath();
+
+            for (let x = 0; x <= containerWidth; x += 5) {
+                const y =
+                    waveY +
+                    Math.sin(x / 50 + time * waveFrequency) * waveAmplitude;
+                if (x === 0) {
+                    this.ctx.moveTo(containerX + x, y);
+                } else {
+                    this.ctx.lineTo(containerX + x, y);
+                }
+            }
+            this.ctx.stroke();
         }
+
+        // 눈금선 그리기
+        this.ctx.strokeStyle = '#2d3748';
+        this.ctx.lineWidth = 1;
+        this.ctx.setLineDash([5, 5]);
+
+        for (let i = 1; i <= 4; i++) {
+            const y = containerY + (containerHeight / 4) * i;
+            this.ctx.beginPath();
+            this.ctx.moveTo(containerX, y);
+            this.ctx.lineTo(containerX + containerWidth, y);
+            this.ctx.stroke();
+
+            // 거리 라벨
+            const distLabel = maxDistance - (maxDistance / 4) * i;
+            this.ctx.fillStyle = '#a0aec0';
+            this.ctx.font = '14px Arial';
+            this.ctx.setLineDash([]);
+            this.ctx.fillText(`${distLabel}mm`, containerX - 50, y + 5);
+        }
+
+        this.ctx.setLineDash([]);
 
         // 중앙에 현재 거리 표시
         this.ctx.fillStyle = '#e2e8f0';
@@ -379,6 +423,15 @@ class RadarSensor {
             `${currentDistance.toFixed(0)} mm`,
             containerX + containerWidth / 2,
             containerY + containerHeight / 2,
+        );
+
+        // 퍼센트 표시
+        this.ctx.font = 'bold 24px Arial';
+        this.ctx.fillStyle = '#cbd5e0';
+        this.ctx.fillText(
+            `${(fillRatio * 100).toFixed(1)}% 채움`,
+            containerX + containerWidth / 2,
+            containerY + containerHeight / 2 + 40,
         );
 
         this.ctx.textAlign = 'left';
