@@ -298,133 +298,158 @@ class RadarSensor {
 
     startAnimation() {
         const animate = () => {
-            this.drawRadar();
+            this.drawContainer();
             requestAnimationFrame(animate);
         };
         animate();
     }
 
-    drawRadar() {
+    drawContainer() {
         const { width, height } = this.canvas;
-        const centerX = width / 2;
-        const centerY = height - 50;
-        const maxRadius = Math.min(width, height) * 0.8;
+        const padding = 40;
+        const containerWidth = width - padding * 2;
+        const containerHeight = height - padding * 2;
+        const containerX = padding;
+        const containerY = padding;
 
         // 배경 클리어
         this.ctx.fillStyle = '#1a202c';
         this.ctx.fillRect(0, 0, width, height);
 
-        // 그리드 원 그리기
-        this.ctx.strokeStyle = '#2d3748';
-        this.ctx.lineWidth = 1;
+        // 컨테이너 외곽선
+        this.ctx.strokeStyle = '#4a5568';
+        this.ctx.lineWidth = 3;
+        this.ctx.strokeRect(
+            containerX,
+            containerY,
+            containerWidth,
+            containerHeight,
+        );
 
-        for (let i = 1; i <= 4; i++) {
-            const radius = (maxRadius / 4) * i;
-            this.ctx.beginPath();
-            this.ctx.arc(centerX, centerY, radius, Math.PI, 0);
-            this.ctx.stroke();
+        // 측정 최대 거리 (mm 단위, 예: 2000mm = 2m)
+        const maxDistance = 2000;
 
-            // 거리 라벨
-            this.ctx.fillStyle = '#4a5568';
-            this.ctx.font = '12px Arial';
-            this.ctx.fillText(
-                `${i * 50}cm`,
-                centerX + radius - 30,
-                centerY - 5,
-            );
-        }
-
-        // 중심선들
-        const angles = [-90, -60, -30, 0, 30, 60, 90];
-        angles.forEach((angle) => {
-            const rad = (angle * Math.PI) / 180;
-            this.ctx.beginPath();
-            this.ctx.moveTo(centerX, centerY);
-            this.ctx.lineTo(
-                centerX + Math.cos(rad) * maxRadius,
-                centerY + Math.sin(rad) * maxRadius,
-            );
-            this.ctx.stroke();
-        });
-
-        // 감지된 객체 표시
+        // 현재 거리 가져오기
+        let currentDistance = 0;
         if (this.detectionHistory.length > 0) {
             const latest =
                 this.detectionHistory[this.detectionHistory.length - 1];
-
-            if (latest.detected && latest.distance > 0) {
-                const distance = Math.min(latest.distance, 200);
-                const radius = (distance / 200) * maxRadius;
-
-                // 펄스 효과
-                const time = Date.now() / 1000;
-                const pulse = Math.sin(time * 5) * 0.2 + 0.8;
-
-                // 객체 표시
-                this.ctx.fillStyle = `rgba(72, 187, 120, ${pulse})`;
-                this.ctx.beginPath();
-                this.ctx.arc(centerX, centerY - radius, 10, 0, Math.PI * 2);
-                this.ctx.fill();
-
-                // 원형 웨이브
-                this.ctx.strokeStyle = `rgba(72, 187, 120, ${0.5 * pulse})`;
-                this.ctx.lineWidth = 2;
-                this.ctx.beginPath();
-                this.ctx.arc(
-                    centerX,
-                    centerY - radius,
-                    15 + pulse * 10,
-                    0,
-                    Math.PI * 2,
-                );
-                this.ctx.stroke();
-            }
+            // cm를 mm로 변환
+            currentDistance = latest.distance * 10;
         }
 
-        // 스캔 라인 애니메이션
-        const scanAngle = ((Date.now() / 1000) % 2) * Math.PI - Math.PI;
+        // 채움 비율 계산 (거리가 가까울수록 많이 채움)
+        let fillRatio = 0;
+        if (currentDistance > 0 && currentDistance <= maxDistance) {
+            fillRatio = 1 - currentDistance / maxDistance;
+        } else if (currentDistance > maxDistance) {
+            fillRatio = 0;
+        }
+
+        // 채워지는 높이 계산
+        const fillHeight = containerHeight * fillRatio;
+
+        // 그라데이션 색상 (채워진 정도에 따라)
         const gradient = this.ctx.createLinearGradient(
-            centerX,
-            centerY,
-            centerX + Math.cos(scanAngle) * maxRadius,
-            centerY + Math.sin(scanAngle) * maxRadius,
+            containerX,
+            containerY + containerHeight,
+            containerX,
+            containerY,
         );
-        gradient.addColorStop(0, 'rgba(102, 126, 234, 0.8)');
-        gradient.addColorStop(1, 'rgba(102, 126, 234, 0)');
 
-        this.ctx.strokeStyle = gradient;
-        this.ctx.lineWidth = 3;
-        this.ctx.beginPath();
-        this.ctx.moveTo(centerX, centerY);
-        this.ctx.lineTo(
-            centerX + Math.cos(scanAngle) * maxRadius,
-            centerY + Math.sin(scanAngle) * maxRadius,
-        );
-        this.ctx.stroke();
+        if (fillRatio > 0.8) {
+            // 거의 가득 참 - 빨간색
+            gradient.addColorStop(0, '#f56565');
+            gradient.addColorStop(1, '#fc8181');
+        } else if (fillRatio > 0.5) {
+            // 반 이상 - 주황색
+            gradient.addColorStop(0, '#ed8936');
+            gradient.addColorStop(1, '#f6ad55');
+        } else if (fillRatio > 0.2) {
+            // 조금 찬 상태 - 노란색
+            gradient.addColorStop(0, '#ecc94b');
+            gradient.addColorStop(1, '#f6e05e');
+        } else if (fillRatio > 0) {
+            // 거의 비어있음 - 초록색
+            gradient.addColorStop(0, '#48bb78');
+            gradient.addColorStop(1, '#68d391');
+        }
 
-        // 히스토리 그래프 (하단)
-        if (this.detectionHistory.length > 1) {
-            this.ctx.strokeStyle = '#48bb78';
+        // 채워진 영역 그리기
+        if (fillHeight > 0) {
+            this.ctx.fillStyle = gradient;
+            this.ctx.fillRect(
+                containerX,
+                containerY + containerHeight - fillHeight,
+                containerWidth,
+                fillHeight,
+            );
+
+            // 물결 효과
+            const time = Date.now() / 1000;
+            const waveAmplitude = 5;
+            const waveFrequency = 2;
+            const waveY = containerY + containerHeight - fillHeight;
+
+            this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
             this.ctx.lineWidth = 2;
             this.ctx.beginPath();
 
-            const graphY = height - 20;
-            const graphWidth = width - 40;
-            const step = graphWidth / this.maxHistory;
-
-            this.detectionHistory.forEach((point, index) => {
-                const x = 20 + index * step;
-                const y = graphY - (point.distance / 200) * 30;
-
-                if (index === 0) {
-                    this.ctx.moveTo(x, y);
+            for (let x = 0; x <= containerWidth; x += 5) {
+                const y =
+                    waveY +
+                    Math.sin(x / 50 + time * waveFrequency) * waveAmplitude;
+                if (x === 0) {
+                    this.ctx.moveTo(containerX + x, y);
                 } else {
-                    this.ctx.lineTo(x, y);
+                    this.ctx.lineTo(containerX + x, y);
                 }
-            });
-
+            }
             this.ctx.stroke();
         }
+
+        // 눈금선 그리기
+        this.ctx.strokeStyle = '#2d3748';
+        this.ctx.lineWidth = 1;
+        this.ctx.setLineDash([5, 5]);
+
+        for (let i = 1; i <= 4; i++) {
+            const y = containerY + (containerHeight / 4) * i;
+            this.ctx.beginPath();
+            this.ctx.moveTo(containerX, y);
+            this.ctx.lineTo(containerX + containerWidth, y);
+            this.ctx.stroke();
+
+            // 거리 라벨
+            const distLabel = maxDistance - (maxDistance / 4) * i;
+            this.ctx.fillStyle = '#a0aec0';
+            this.ctx.font = '14px Arial';
+            this.ctx.setLineDash([]);
+            this.ctx.fillText(`${distLabel}mm`, containerX - 50, y + 5);
+        }
+
+        this.ctx.setLineDash([]);
+
+        // 중앙에 현재 거리 표시
+        this.ctx.fillStyle = '#e2e8f0';
+        this.ctx.font = 'bold 48px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText(
+            `${currentDistance.toFixed(0)} mm`,
+            containerX + containerWidth / 2,
+            containerY + containerHeight / 2,
+        );
+
+        // 퍼센트 표시
+        this.ctx.font = 'bold 24px Arial';
+        this.ctx.fillStyle = '#cbd5e0';
+        this.ctx.fillText(
+            `${(fillRatio * 100).toFixed(1)}% 채움`,
+            containerX + containerWidth / 2,
+            containerY + containerHeight / 2 + 40,
+        );
+
+        this.ctx.textAlign = 'left';
     }
 
     updateStatus(connected) {
