@@ -125,13 +125,13 @@ class RadarSensor {
         }
     }
 
-    // 주기적으로 센서에 명령 전송 (500ms 간격)
+    // 주기적으로 센서에 명령 전송 (100ms 간격)
     async startPolling() {
         this.polling = true;
 
         while (this.polling && this.connected) {
             await this.sendDistanceCommand();
-            await new Promise((resolve) => setTimeout(resolve, 500));
+            await new Promise((resolve) => setTimeout(resolve, 100));
         }
     }
 
@@ -261,26 +261,11 @@ class RadarSensor {
     }
 
     updateDisplay(distance, strength, detected) {
-        // 거리 표시
+        // 거리 표시 (mm 단위)
         if (distance !== null && distance !== undefined) {
+            const distanceMm = distance * 10; // cm를 mm로 변환
             document.getElementById('distance').textContent =
-                distance.toFixed(1);
-        }
-
-        // 신호 강도 표시
-        if (strength !== null && strength !== undefined) {
-            document.getElementById('strength').textContent =
-                strength.toFixed(0);
-        }
-
-        // 감지 상태
-        const detectionEl = document.getElementById('detection');
-        if (detected) {
-            detectionEl.textContent = '감지됨';
-            detectionEl.style.color = '#38a169';
-        } else {
-            detectionEl.textContent = '없음';
-            detectionEl.style.color = '#718096';
+                distanceMm.toFixed(0);
         }
 
         // 히스토리에 추가
@@ -341,9 +326,9 @@ class RadarSensor {
         // 채움 비율 계산 (거리가 가까울수록 많이 채움)
         let fillRatio = 0;
         if (currentDistance > 0 && currentDistance <= maxDistance) {
-            fillRatio = 1 - currentDistance / maxDistance;
+            fillRatio = currentDistance / maxDistance;
         } else if (currentDistance > maxDistance) {
-            fillRatio = 0;
+            fillRatio = 1;
         }
 
         // 채워지는 높이 계산
@@ -384,51 +369,7 @@ class RadarSensor {
                 containerWidth,
                 fillHeight,
             );
-
-            // 물결 효과
-            const time = Date.now() / 1000;
-            const waveAmplitude = 5;
-            const waveFrequency = 2;
-            const waveY = containerY + containerHeight - fillHeight;
-
-            this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-            this.ctx.lineWidth = 2;
-            this.ctx.beginPath();
-
-            for (let x = 0; x <= containerWidth; x += 5) {
-                const y =
-                    waveY +
-                    Math.sin(x / 50 + time * waveFrequency) * waveAmplitude;
-                if (x === 0) {
-                    this.ctx.moveTo(containerX + x, y);
-                } else {
-                    this.ctx.lineTo(containerX + x, y);
-                }
-            }
-            this.ctx.stroke();
         }
-
-        // 눈금선 그리기
-        this.ctx.strokeStyle = '#2d3748';
-        this.ctx.lineWidth = 1;
-        this.ctx.setLineDash([5, 5]);
-
-        for (let i = 1; i <= 4; i++) {
-            const y = containerY + (containerHeight / 4) * i;
-            this.ctx.beginPath();
-            this.ctx.moveTo(containerX, y);
-            this.ctx.lineTo(containerX + containerWidth, y);
-            this.ctx.stroke();
-
-            // 거리 라벨
-            const distLabel = maxDistance - (maxDistance / 4) * i;
-            this.ctx.fillStyle = '#a0aec0';
-            this.ctx.font = '14px Arial';
-            this.ctx.setLineDash([]);
-            this.ctx.fillText(`${distLabel}mm`, containerX - 50, y + 5);
-        }
-
-        this.ctx.setLineDash([]);
 
         // 중앙에 현재 거리 표시
         this.ctx.fillStyle = '#e2e8f0';
@@ -438,15 +379,6 @@ class RadarSensor {
             `${currentDistance.toFixed(0)} mm`,
             containerX + containerWidth / 2,
             containerY + containerHeight / 2,
-        );
-
-        // 퍼센트 표시
-        this.ctx.font = 'bold 24px Arial';
-        this.ctx.fillStyle = '#cbd5e0';
-        this.ctx.fillText(
-            `${(fillRatio * 100).toFixed(1)}% 채움`,
-            containerX + containerWidth / 2,
-            containerY + containerHeight / 2 + 40,
         );
 
         this.ctx.textAlign = 'left';

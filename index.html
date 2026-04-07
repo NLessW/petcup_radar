@@ -13,7 +13,7 @@
 
             body {
                 font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                background: #000000;
                 min-height: 100vh;
                 display: flex;
                 justify-content: center;
@@ -22,16 +22,16 @@
             }
 
             .container {
-                background: white;
+                background: #1a1a1a;
                 border-radius: 20px;
-                box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
                 padding: 40px;
                 max-width: 800px;
                 width: 100%;
             }
 
             h1 {
-                color: #333;
+                color: #ffffff;
                 text-align: center;
                 margin-bottom: 30px;
                 font-size: 2em;
@@ -191,7 +191,7 @@
     </head>
     <body>
         <div class="container">
-            <h1>🎯 DFRobot SEN0395 mmWave 레이더</h1>
+            <h1>레이더 센서 테스트</h1>
 
             <div class="controls">
                 <select
@@ -226,27 +226,7 @@
                         <div class="data-label">거리</div>
                         <div class="data-value">
                             <span id="distance">--</span>
-                            <span class="data-unit">cm</span>
-                        </div>
-                    </div>
-                    <div class="data-item">
-                        <div class="data-label">신호 강도</div>
-                        <div class="data-value">
-                            <span id="strength">--</span>
-                            <span class="data-unit">dB</span>
-                        </div>
-                    </div>
-                    <div class="data-item">
-                        <div class="data-label">감지 상태</div>
-                        <div class="data-value">
-                            <span id="detection">대기중</span>
-                        </div>
-                    </div>
-                    <div class="data-item">
-                        <div class="data-label">데이터 수신</div>
-                        <div class="data-value">
-                            <span id="packetCount">0</span>
-                            <span class="data-unit">개</span>
+                            <span class="data-unit">mm</span>
                         </div>
                     </div>
                 </div>
