@@ -325,7 +325,7 @@ class RadarSensor {
 
         // 채움 비율 계산 (거리가 가까울수록 많이 채움)
         let fillRatio = 0;
-        if (currentDistance > 0 && currentDistance <= maxDistance) {
+        if (currentDistance >= 0 && currentDistance <= maxDistance) {
             fillRatio = 1 - currentDistance / maxDistance;
         } else if (currentDistance > maxDistance) {
             fillRatio = 0;
